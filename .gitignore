@@ -1,0 +1,22 @@
+# R session files
+.Rhistory
+.RData
+.Ruserdata
+.Rprofile
+
+# RStudio files
+.Rproj.user/
+
+# R environment 
+renv/
+
+# Output
+output/*
+# Keep images
+!output/*.png
+
+# Other stuff
+*.html
+*.pdf
+*.docx
+*.csv
