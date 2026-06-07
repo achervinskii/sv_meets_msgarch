@@ -1,9 +1,9 @@
-# Comparsion of The Maskov-Switching GARCH (MS-GARCH) and The Stochastic Volatility (SV) for the volatility forecasting
+# Comparsion of Markov-Switching GARCH (MS-GARCH) and The Stochastic Volatility (SV) for the financial volatility forecasting
 
 It is a part of my Bachelor thesis project. The goal is to compare the Bayesian fit of two discrete volatility models using a consistent score. Both models are estimated and sampled with R packages:
 
-- [MSGARCH]: https://github.com/keblu/MSGARCH/
-- [stochvol]: https://gregorkastner.github.io/stochvol/
+- [MSGARCH](https://github.com/keblu/MSGARCH/)
+- [stochvol](https://gregorkastner.github.io/stochvol/)
 
 ## Usage
 
