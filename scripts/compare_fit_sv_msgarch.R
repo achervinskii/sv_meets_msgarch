@@ -3,6 +3,7 @@ set.seed(1)
 library(ggplot2)
 library(stochvol)
 library(MSGARCH)
+# devtools::load_all("../MSGARCH_mod/Package/")
 library(future.apply)
 library(progressr)
 library(dplyr)
@@ -14,16 +15,30 @@ start_date <- "2016-01-01"
 end_date <- "2026-01-01"
 
 ticker <- "^GSPC"
+df <- fetch_daily_prices(ticker, start_date, end_date)
 
 # contsurct the return series
 y <- df[["close"]]
 lret <- diff(log(y))
+lret_dates <- df$datetime[-1] 
 
 # compute realized volatility on hourly data
 df_hourly <- fetch_hourly_prices()
+df_rv <- df_hourly |> 
+  mutate(log_close = log(close)) |>
+  mutate(r = log_close - lag(log_close)) |>
+  group_by(lubridate::date(datetime)) |>
+  filter_out(n() <=4) |>
+  summarize(rv = sum(r ** 2)) |>
+  ungroup()
+
+# verify that rv covers the lret period
 
 
-sv_model <- function(draws = 10000, burnin = 10000, n_chains = 1) {
+
+  
+
+sv_model <- function(draws = 5000, burnin = 5000, n_chains = 1) {
   list(
     draws = draws,
     burnin = burnin,
@@ -32,13 +47,15 @@ sv_model <- function(draws = 10000, burnin = 10000, n_chains = 1) {
   )
 }
 
-ms_model <- function(draws = 10000, burnin = 10000) {
+ms_model <- function(draws = 5000, burnin = 5000) {
   list(
     ctr = list(
       nburn = burnin,
       nmcmc = draws + burnin,
-      nthin = 5
+      nthin = 1
     ),
+    draws = draws + burnin,
+
     # if nsim is set then for each posterior draw nsim observations are sampled
     # to me it seems more appripriate to sample one simulation per mcmc path
     # it also possibly causes memory issues, look up the code
@@ -83,7 +100,8 @@ predict_model <- function(model, y, n_ahead) {
       do.return.draw = TRUE,
     )
     mc_y <- t(mc_pred$draw)
-    mc_sigma <- matrix(NA_real_, nrow = length(mc_y), ncol = n_ahead)
+    mc_sigma <- t(mc_pred$vol_draw)
+    # mc_sigma <- matrix(NA_real_, nrow = length(mc_y), ncol = n_ahead)
     result <- list(
       sigma = mc_sigma,
       y = mc_y
@@ -92,19 +110,20 @@ predict_model <- function(model, y, n_ahead) {
   result
 }
 
-loglik_sv <- function(test_y, mc_sigma) {
-  log(mean(dnorm(test_y, sd = mc_sigma)))
-}
-
-loglik_kde <- function(test_y, mc_y, df, bw) {
-  z <- (test_y - mc_y) / bw
+loglik <- function(test_y, mc_y, mc_sigma, df, bw) {
   if (df == -1) { # gaussian kde
+    z <- (test_y - mc_y) / bw
     result <- log(mean(dnorm(z) / bw))
-  } else { # t kde
+  } else if (df == -2) { # t kde
+    result <- log(mean(dnorm(test_y, sd = mc_sigma)))
+  } else {
+    z <- (test_y - mc_y) / bw
     result <- log(mean(dt(z, df = df) / bw))
   }
   result
 }
+
+qlike <- function(mc_sigma) {}
 
 run_backtest_from <- function(model, last_obs_idx, n_ahead,
                               bt_idx = NULL, df = NULL) {
@@ -130,40 +149,42 @@ run_backtest_from <- function(model, last_obs_idx, n_ahead,
     if (!is.null(df)) {
       # do KDEs
       for (df_idx in seq_along(df)) {
-        log_scores_i[h, df_idx] <- loglik_kde(
+        log_scores_i[h, df_idx] <- loglik(
           test_y = test_y,
           mc_y = pred_y[, h],
+          mc_sigma = pred_sigma[, h],
           df = df[df_idx],
           bw = bw
         )
       }
-    } else {
-      log_scores_i[h, 1] <- loglik_sv(
-        test_y = test_y,
-        mc_sigma = pred_sigma[, h]
-      )
     }
-
     # quantile is the same for both models
     var_95_i[h, ] <- quantile(
       pred_y[, h],
       probs = c(0.025, 0.975)
     )
+
+    # for the horizon i want to plot, save the mc sample for sigma
+    if (h == horizon_to_plot) {
+      mc_sigma_i <- pred_sigma[, h]
+    }
   }
 
   # the return, assumed to be a worker specific
   list(
     idx = bt_idx,
     log_scores = log_scores_i,
-    var_95 = var_95_i
+    var_95 = var_95_i,
+    mc_sigma = mc_sigma_i
   )
 }
 
 # hyperparames for backtesting
 n_ahead <- 10
 backtest_length <- 500
-msgarch_df <- c(-1, 2, 3)
-sv_df <- c(-1, 2, 3)
+horizon_to_plot <- 5
+msgarch_df <- c(-2, -1, 2)
+sv_df <- msgarch_df
 # derived params for backtesting
 # number of the data points used for test used for array indexing
 n_bt <- backtest_length - n_ahead + 1
@@ -173,6 +194,9 @@ last_train_idx_start <- n_total - backtest_length - 1
 last_train_idx_end <- n_total - n_ahead - 1
 # parallelize
 plan(multisession, workers = 6)
+
+
+
 
 # instance of sv
 sv <- sv_model()
@@ -187,6 +211,12 @@ var_95_sv <- array(
   NA_real_,
   dim = c(n_bt, n_ahead, 2)
 )
+
+mc_sigma_sv <- array(
+  NA_real_,
+  dim = c(n_bt, sv$draws)
+)
+
 
 # split the training sets between the workers
 # the packages don't support online learning anyways
@@ -208,18 +238,29 @@ with_progress({
     future.seed = TRUE
   )
 })
+# save everything
+file_results_sv <- "./output/results_sv.sda"
+save(results_sv, file = file_results_sv)
 
 # gather the results from workers
 for (res in results_sv) {
   idx <- res$idx
   log_scores_sv[idx, , ] <- res$log_scores
   var_95_sv[idx, , ] <- res$var_95
+  mc_sigma_sv[idx, ] <- res$mc_sigma
 }
 
-plan(multisession, workers = 6)
+plan(multisession, workers = 3)
 # repeat for ms garch
 msgarch <- ms_model()
-
+#
+# # TESTING
+# train_y <- lret[1:500]
+# pred <- predict_model(msgarch, train_y, n_ahead)
+# pred <- predict_model(msgarch, train_y, 1)
+# bcktest <- run_backtest_from(msgarch, last_train_idx_start + 1, n_ahead, 1, msgarch_df)
+# pred_sv <- predict_model(sv, train_y, n_ahead)
+#
 # preallocation
 log_scores_ms <- array(
   NA_real_,
@@ -229,6 +270,11 @@ log_scores_ms <- array(
 var_95_ms <- array(
   NA_real_,
   dim = c(n_bt, n_ahead, 2)
+)
+
+mc_sigma_ms <- array(
+  NA_real_,
+  dim = c(n_bt, msgarch$draws)
 )
 
 xs <- seq_len(n_bt)
@@ -248,17 +294,22 @@ with_progress({
   )
 })
 
+# save everything
+file_results_ms <- "./output/results_ms.rda"
+save(results_ms, file = file_results_ms)
+
 for (res in results_ms) {
   idx <- res$idx
   log_scores_ms[idx, , ] <- res$log_scores
   var_95_ms[idx, , ] <- res$var_95
+  mc_sigma_ms[idx, ] <- res$mc_sigma
 }
+
 
 # gather everything into a dataframe
 
 
-# plot of the VaR with 5 day horizon
-horizon_to_plot <- 5
+# plot of the VaR with the horizon specified earlier
 test_start_idx <- last_train_idx_start + horizon_to_plot
 test_end_idx <- last_train_idx_end + horizon_to_plot
 test_data <- lret[test_start_idx:test_end_idx]
@@ -356,7 +407,8 @@ df_diff <- df_cumulative |>
   )
 
 # plot
-diff_plot <- ggplot(df_diff,
+diff_plot <- ggplot(
+  df_diff,
   aes(x = datetime, y = cum_diff, color = h, group = h)
 ) +
   geom_line(aes(color = h)) +
