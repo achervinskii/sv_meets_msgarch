@@ -1,3 +1,5 @@
+DISCLAIMER: This project is in an early development phase. It uses a (yet unpublished) fork of the MSGARCH package.  
+
 # Comparsion of Markov-Switching GARCH (MS-GARCH) and The Stochastic Volatility (SV) for the financial volatility forecasting
 
 It is a part of my Bachelor thesis project. The goal is to compare the Bayesian fit of two discrete volatility models using a consistent score. Both models are estimated and sampled with R packages:
@@ -7,7 +9,7 @@ It is a part of my Bachelor thesis project. The goal is to compare the Bayesian 
 
 ## Usage
 
-To setup install packages from renv.lock into the local environment's library, use
+~~To setup install packages from renv.lock into the local environment's library, use~~
 
 ```r
 install.packages("renv")
