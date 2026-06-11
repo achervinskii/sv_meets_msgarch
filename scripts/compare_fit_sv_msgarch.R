@@ -1,5 +1,3 @@
-set.seed(1)
-
 library(ggplot2)
 library(stochvol)
 library(MSGARCH)
@@ -9,10 +7,27 @@ library(progressr)
 library(dplyr)
 handlers(handler_progress(format = "[:bar] :percent :eta :message"))
 
+set.seed(1)
+
 # data fetching. not fetched if exists per ticker
 source("./R/fetching_data.R")
 start_date <- "2016-01-01"
 end_date <- "2026-01-01"
+
+# hyperparames for backtesting
+n_ahead <- 10
+backtest_length <- 500
+horizon_to_plot <- 5
+msgarch_df <- c(-2, -1, 2)
+sv_df <- msgarch_df
+# derived params for backtesting
+# number of the data points used for test used for array indexing
+n_bt <- backtest_length - n_ahead + 1
+# the moving index of the last training observation
+n_total <- length(lret)
+last_train_idx_start <- n_total - backtest_length - 1
+last_train_idx_end <- n_total - n_ahead - 1
+# parallelize
 
 ticker <- "^GSPC"
 df <- fetch_daily_prices(ticker, start_date, end_date)
@@ -20,23 +35,26 @@ df <- fetch_daily_prices(ticker, start_date, end_date)
 # contsurct the return series
 y <- df[["close"]]
 lret <- diff(log(y))
-lret_dates <- df$datetime[-1] 
+lret_dates <- df$datetime[-1]
 
 # compute realized volatility on hourly data
 df_hourly <- fetch_hourly_prices()
-df_rv <- df_hourly |> 
+
+df_rv <- df_hourly |>
+  filter_out(is.na(close)) |>
   mutate(log_close = log(close)) |>
-  mutate(r = log_close - lag(log_close)) |>
-  group_by(lubridate::date(datetime)) |>
-  filter_out(n() <=4) |>
-  summarize(rv = sum(r ** 2)) |>
-  ungroup()
+  mutate(r = log_close - lag(log_close), date = lubridate::date(datetime)) |>
+  group_by(date) |>
+  summarize(rv = sum(r**2)) |>
+  ungroup() |>
+  slice(-1)
 
-# verify that rv covers the lret period
+lret_dates <- lubridate::date(lret_dates)
+rv_dates <- df_rv$date
+common_dates <- intersect(rv_dates, lret_dates_text)
+# verify the date continuity
+stopifnot(!anyNA(common_dates[which.min(common_dates):which.max(common_dates)]))
 
-
-
-  
 
 sv_model <- function(draws = 5000, burnin = 5000, n_chains = 1) {
   list(
@@ -179,24 +197,7 @@ run_backtest_from <- function(model, last_obs_idx, n_ahead,
   )
 }
 
-# hyperparames for backtesting
-n_ahead <- 10
-backtest_length <- 500
-horizon_to_plot <- 5
-msgarch_df <- c(-2, -1, 2)
-sv_df <- msgarch_df
-# derived params for backtesting
-# number of the data points used for test used for array indexing
-n_bt <- backtest_length - n_ahead + 1
-# the moving index of the last training observation
-n_total <- length(lret)
-last_train_idx_start <- n_total - backtest_length - 1
-last_train_idx_end <- n_total - n_ahead - 1
-# parallelize
 plan(multisession, workers = 6)
-
-
-
 
 # instance of sv
 sv <- sv_model()
