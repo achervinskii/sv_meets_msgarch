@@ -24,9 +24,6 @@ sv_df <- msgarch_df
 # number of the data points used for test used for array indexing
 n_bt <- backtest_length - n_ahead + 1
 # the moving index of the last training observation
-n_total <- length(lret)
-last_train_idx_start <- n_total - backtest_length - 1
-last_train_idx_end <- n_total - n_ahead - 1
 # parallelize
 
 ticker <- "^GSPC"
@@ -37,6 +34,10 @@ y <- df[["close"]]
 lret <- diff(log(y))
 lret_dates <- df$datetime[-1]
 
+n_total <- length(lret)
+last_train_idx_start <- n_total - backtest_length - 1
+last_train_idx_end <- n_total - n_ahead - 1
+
 # compute realized volatility on hourly data
 df_hourly <- fetch_hourly_prices()
 
@@ -45,15 +46,25 @@ df_rv <- df_hourly |>
   mutate(log_close = log(close)) |>
   mutate(r = log_close - lag(log_close), date = lubridate::date(datetime)) |>
   group_by(date) |>
-  summarize(rv = sum(r**2)) |>
+  summarize(rv = sqrt(sum(r**2))) |>
   ungroup() |>
   slice(-1)
 
-lret_dates <- lubridate::date(lret_dates)
-rv_dates <- df_rv$date
-common_dates <- intersect(rv_dates, lret_dates_text)
-# verify the date continuity
-stopifnot(!anyNA(common_dates[which.min(common_dates):which.max(common_dates)]))
+lret_days <- lubridate::date(lret_dates)
+rv_days <- df_rv$date
+common_days <- intersect(rv_days, lret_days)
+# take the first and the last dates
+start_common <- min(common_days)
+end_common <- max(common_days)
+# verify that everything in between is present in both series
+stopifnot(identical(
+  lret_days[lret_days > start_common & lret_days < end_common],
+  rv_days[rv_days > start_common & rv_days < end_common]
+))
+
+# in the sequel use start_common and end_common for the rv testing
+rv_start_idx <- which(lret_days == start_common)
+rv_end_idx <- which(lret_days == end_common)
 
 
 sv_model <- function(draws = 5000, burnin = 5000, n_chains = 1) {
@@ -141,7 +152,8 @@ loglik <- function(test_y, mc_y, mc_sigma, df, bw) {
   result
 }
 
-qlike <- function(mc_sigma) {}
+
+
 
 run_backtest_from <- function(model, last_obs_idx, n_ahead,
                               bt_idx = NULL, df = NULL) {
@@ -162,7 +174,8 @@ run_backtest_from <- function(model, last_obs_idx, n_ahead,
   var_95_i <- matrix(NA_real_, n_ahead, 2)
 
   for (h in 1:n_ahead) {
-    test_y <- lret[last_obs_idx + h]
+    cur_obs_idx <- last_obs_idx + h
+    test_y <- lret[cur_obs_idx]
 
     if (!is.null(df)) {
       # do KDEs
@@ -193,7 +206,8 @@ run_backtest_from <- function(model, last_obs_idx, n_ahead,
     idx = bt_idx,
     log_scores = log_scores_i,
     var_95 = var_95_i,
-    mc_sigma = mc_sigma_i
+    mc_sigma = mc_sigma_i,
+    qlike_scores = qlike_scores_i
   )
 }
 
@@ -241,7 +255,8 @@ with_progress({
 })
 # save everything
 file_results_sv <- "./output/results_sv.sda"
-save(results_sv, file = file_results_sv)
+# save(results_sv, file = file_results_sv)
+# load(file = file_results_sv)
 
 # gather the results from workers
 for (res in results_sv) {
@@ -297,7 +312,8 @@ with_progress({
 
 # save everything
 file_results_ms <- "./output/results_ms.rda"
-save(results_ms, file = file_results_ms)
+# save(results_ms, file = file_results_ms)
+load(file = file_results_ms)
 
 for (res in results_ms) {
   idx <- res$idx
@@ -423,3 +439,13 @@ ggsave("output/cum_loglik_ms_minus_sv_across_kde.png",
   diff_plot,
   width = 10, height = 12, dpi = 300
 )
+
+
+# TODO: the qlike plot using the saved mc_sigma for a specific horizon
+qlike <- function(test_rv, mc_sigma) {
+  # convert the mc sample to a point
+  benchmark <- median(mc_sigma)
+  log(benchmark^2) + test_rv / (benchmark^2)
+}
+
+# TODO: geom_bin_2d plots for the mc_sigma samples
