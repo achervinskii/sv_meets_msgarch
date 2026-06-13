@@ -1,7 +1,8 @@
-set.seed(1)
-source("./R/simulation_and_plotting.R")
 library(ggplot2)
 library(patchwork)
+
+source("./R/simulation_and_plotting.R")
+set.seed(1)
 
 cols <- list(
   msgarch = adjustcolor("red"),
@@ -72,7 +73,7 @@ plot <- ggplot(df, aes(x = t)) +
   ) +
   geom_line(aes(y = y_sv), color = cols$sv, linewidth = lw, alpha = alp) +
   scale_y_continuous(limits = c(-ymax, ymax)) +
-  theme_minimal() +
+  theme_bw() +
   theme(
     axis.title.x = element_blank(),
     axis.title.y = element_blank(),
@@ -108,7 +109,7 @@ plot_dens <- ggplot(df_dens, aes(x = y, colour = group)) +
     breaks = c("msgarch", "sv", "norm")
   ) +
   coord_flip() +
-  theme_minimal() +
+  theme_bw() +
   theme(
     axis.title.x = element_blank(),
     axis.title.y = element_blank(),
@@ -117,4 +118,4 @@ plot_dens <- ggplot(df_dens, aes(x = y, colour = group)) +
 
 plot_comb <- plot + plot_dens + plot_layout(widths = c(3, 1))
 
-ggsave("output/plot2.png", plot_comb, width = 10, height = 5, dpi = 300)
+ggsave("output/msgarch_and_matched_sv_simulated.png", plot_comb, width = 10, height = 5, dpi = 300)

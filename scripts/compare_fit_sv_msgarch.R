@@ -1,10 +1,11 @@
-library(ggplot2)
+library(ggplot2) 
 library(stochvol)
 library(MSGARCH)
 # devtools::load_all("../MSGARCH_mod/Package/")
 library(future.apply)
 library(progressr)
 library(dplyr)
+library(patchwork)
 handlers(handler_progress(format = "[:bar] :percent :eta :message"))
 
 set.seed(1)
@@ -12,13 +13,16 @@ set.seed(1)
 # data fetching. not fetched if exists per ticker
 source("./R/fetching_data.R")
 start_date <- "2016-01-01"
-end_date <- "2026-01-01"
+end_date <- "2026-06-13"
 
 # hyperparames for backtesting
 n_ahead <- 10
 backtest_length <- 500
+n_draws <- 3000
+n_burnin <- 3000
 horizon_to_plot <- 5
-msgarch_df <- c(-2, -1, 2)
+msgarch_df <- c(-3, -2, -1, 2)
+labels_df <- c("QLIKE", "Model-implied", "Gaussian Kernel", "Student t Kernel (v = 2)")
 sv_df <- msgarch_df
 # derived params for backtesting
 # number of the data points used for test used for array indexing
@@ -46,7 +50,7 @@ df_rv <- df_hourly |>
   mutate(log_close = log(close)) |>
   mutate(r = log_close - lag(log_close), date = lubridate::date(datetime)) |>
   group_by(date) |>
-  summarize(rv = sqrt(sum(r**2))) |>
+  summarize(rvol = sqrt(sum(r**2))) |>
   ungroup() |>
   slice(-1)
 
@@ -63,8 +67,8 @@ stopifnot(identical(
 ))
 
 # in the sequel use start_common and end_common for the rv testing
-rv_start_idx <- which(lret_days == start_common)
-rv_end_idx <- which(lret_days == end_common)
+qlike_start_idx <- which(lret_days == start_common)
+qlike_end_idx <- which(lret_days == end_common)
 
 
 sv_model <- function(draws = 5000, burnin = 5000, n_chains = 1) {
@@ -80,10 +84,10 @@ ms_model <- function(draws = 5000, burnin = 5000) {
   list(
     ctr = list(
       nburn = burnin,
-      nmcmc = draws + burnin,
+      nmcmc = draws,
       nthin = 1
     ),
-    draws = draws + burnin,
+    draws = draws,
 
     # if nsim is set then for each posterior draw nsim observations are sampled
     # to me it seems more appripriate to sample one simulation per mcmc path
@@ -139,21 +143,25 @@ predict_model <- function(model, y, n_ahead) {
   result
 }
 
-loglik <- function(test_y, mc_y, mc_sigma, df, bw) {
+loglik <- function(test_y, mc_y, mc_sigma, df, bw, rv = NA) {
   if (df == -1) { # gaussian kde
     z <- (test_y - mc_y) / bw
     result <- log(mean(dnorm(z) / bw))
-  } else if (df == -2) { # t kde
+  } else if (df == -2) { # model-implied density
     result <- log(mean(dnorm(test_y, sd = mc_sigma)))
-  } else {
+  } else if (df == -3) { # compute the qlike
+    if (is.na(rv)) {
+      result <- 0
+    } else {
+      point_forecast <- mean(mc_sigma)
+      result <- -(log(point_forecast^2) + rv^2 / (point_forecast^2))
+    }
+  } else { # t kde
     z <- (test_y - mc_y) / bw
     result <- log(mean(dt(z, df = df) / bw))
   }
   result
 }
-
-
-
 
 run_backtest_from <- function(model, last_obs_idx, n_ahead,
                               bt_idx = NULL, df = NULL) {
@@ -178,6 +186,13 @@ run_backtest_from <- function(model, last_obs_idx, n_ahead,
     test_y <- lret[cur_obs_idx]
 
     if (!is.null(df)) {
+      # determine rv value
+      if (cur_obs_idx >= qlike_start_idx && cur_obs_idx <= qlike_end_idx) {
+        rv <- df_rv$rv[cur_obs_idx - qlike_start_idx + 1]
+      } else {
+        rv <- NA
+      }
+
       # do KDEs
       for (df_idx in seq_along(df)) {
         log_scores_i[h, df_idx] <- loglik(
@@ -185,7 +200,8 @@ run_backtest_from <- function(model, last_obs_idx, n_ahead,
           mc_y = pred_y[, h],
           mc_sigma = pred_sigma[, h],
           df = df[df_idx],
-          bw = bw
+          bw = bw,
+          rv = rv
         )
       }
     }
@@ -206,15 +222,14 @@ run_backtest_from <- function(model, last_obs_idx, n_ahead,
     idx = bt_idx,
     log_scores = log_scores_i,
     var_95 = var_95_i,
-    mc_sigma = mc_sigma_i,
-    qlike_scores = qlike_scores_i
+    mc_sigma = mc_sigma_i
   )
 }
 
 plan(multisession, workers = 6)
 
 # instance of sv
-sv <- sv_model()
+sv <- sv_model(draws = n_draws, burnin = n_burnin)
 
 # preallocation
 log_scores_sv <- array(
@@ -266,9 +281,9 @@ for (res in results_sv) {
   mc_sigma_sv[idx, ] <- res$mc_sigma
 }
 
-plan(multisession, workers = 3)
+plan(multisession, workers = 5)
 # repeat for ms garch
-msgarch <- ms_model()
+msgarch <- ms_model(draws = n_draws, burnin = n_burnin)
 #
 # # TESTING
 # train_y <- lret[1:500]
@@ -313,7 +328,7 @@ with_progress({
 # save everything
 file_results_ms <- "./output/results_ms.rda"
 # save(results_ms, file = file_results_ms)
-load(file = file_results_ms)
+# load(file = file_results_ms)
 
 for (res in results_ms) {
   idx <- res$idx
@@ -340,20 +355,35 @@ var_df <- data.frame(
   var_ub_ms = var_95_ms[, horizon_to_plot, 2]
 )
 
+cols <- list(
+  msgarch = adjustcolor("red"),
+  sv = adjustcolor("#007712"),
+  hl = adjustcolor("#ff6d00")
+)
+
 # plot vars arojnd the return series
 plot <- ggplot(var_df, aes(x = t)) +
   geom_line(aes(y = y), color = "black") +
   geom_ribbon(aes(ymin = var_lb_sv, ymax = var_ub_sv),
     fill = "blue", alpha = 0.1
   ) +
-  geom_line(aes(y = var_lb_sv), color = "blue") +
-  geom_line(aes(y = var_ub_sv), color = "blue") +
+  geom_line(aes(y = var_lb_sv, color = "SV")) +
+  geom_line(aes(y = var_ub_sv, color = "SV")) +
   geom_ribbon(aes(ymin = var_lb_ms, ymax = var_ub_ms),
     fill = "red", alpha = 0.1
   ) +
-  geom_line(aes(y = var_lb_ms), color = "red") +
-  geom_line(aes(y = var_ub_ms), color = "red") +
-  theme_minimal()
+  geom_line(aes(y = var_lb_ms, color = "MS-GARCH")) +
+  geom_line(aes(y = var_ub_ms, color = "MS-GARCH")) +
+  scale_colour_manual(
+    name = "Model",
+    values = c(cols$msgarch, cols$sv),
+    labels = c("MS-GARCH", "SV")
+  ) +
+  labs(
+    x = "Time",
+    y = "Double-sided 0.95 VaR"
+  ) +
+  theme_bw()
 
 ggsave("output/value_at_risk_ms_sv.png",
   plot,
@@ -392,7 +422,7 @@ df_long$df_kde <- ifelse(
 df_long$df_kde <- factor(
   df_long$df_kde,
   levels = sort(unique(df_long$df_kde)),
-  labels = paste0("v = ", sort(unique(df_long$df_kde)))
+  labels = labels_df
 )
 head(df_long)
 
@@ -404,7 +434,7 @@ df_long$datetime <- df$datetime[df_long$absolute_time]
 
 # save df_long, to avoid recomputing when debuging
 file_df_long <- "./output/df_long.rda"
-save(df_long, file = file_df_long)
+# save(df_long, file = file_df_long)
 # load(file_df_long)
 
 # compute the cumulative predictions within each tuple (model, horizon, and DoF)
@@ -425,14 +455,19 @@ df_diff <- df_cumulative |>
 
 # plot
 diff_plot <- ggplot(
-  df_diff,
+  filter_out(df_diff, df_kde == "QLIKE"),
   aes(x = datetime, y = cum_diff, color = h, group = h)
 ) +
   geom_line(aes(color = h)) +
   scale_color_gradient(low = "green", high = "red") +
   geom_hline(yintercept = 0) +
-  scale_y_continuous(limits = c(-15, 15)) +
-  theme_minimal() +
+  coord_cartesian(ylim = c(-20, 20)) +
+  # scale_y_continuous(limits = c(-15, 15)) +
+  labs(
+    color = "Horizon", y = "LogLikelihood(MS-GARCH,t) - LogLikelihood(SV,t)",
+    x = "Date"
+  ) +
+  theme_bw() +
   facet_grid(rows = vars(df_kde))
 
 ggsave("output/cum_loglik_ms_minus_sv_across_kde.png",
@@ -440,12 +475,50 @@ ggsave("output/cum_loglik_ms_minus_sv_across_kde.png",
   width = 10, height = 12, dpi = 300
 )
 
+# QLIKE separately to control y sale
+qlike_plot <- ggplot(
+  filter(df_diff, df_kde == "QLIKE"),
+  aes(x = datetime, y = cum_diff, color = h, group = h)
+) +
+  geom_line(aes(color = h)) +
+  scale_color_gradient(low = "green", high = "red") +
+  geom_hline(yintercept = 0) +
+  scale_y_continuous(limits = c(-100, 100)) +
+  labs(
+    color = "Horizon", y = "-(QLIKE(MS-GARCH, t) - QLIKE(SV, t))",
+    x = "Date"
+  ) +
+  theme_bw()
 
-# TODO: the qlike plot using the saved mc_sigma for a specific horizon
-qlike <- function(test_rv, mc_sigma) {
-  # convert the mc sample to a point
-  benchmark <- median(mc_sigma)
-  log(benchmark^2) + test_rv / (benchmark^2)
-}
+ggsave("output/cum_qlike_ms_minus_sv.png", qlike_plot,
+  width = 10, height = 4, dpi = 300
+)
+
 
 # TODO: geom_bin_2d plots for the mc_sigma samples
+df_sigma_ms <- data.frame(
+  mc_sigma = c(mc_sigma_ms),
+  bt_idx = rep(1:n_bt, times = n_draws),
+  model = "MS-GARCH"
+)
+df_sigma_sv <- data.frame(
+  mc_sigma = c(mc_sigma_sv),
+  bt_idx = rep(1:n_bt, times = n_draws),
+  model = "SV"
+)
+df_sigma <- rbind(df_sigma_ms, df_sigma_sv)
+density_plots <- ggplot(
+  df_sigma,
+  aes(bt_idx, mc_sigma)
+) +
+  geom_point(alpha = 1 / 100, size = 0.5) +
+  scale_y_continuous(limits = c(0, 0.05)) +
+  facet_grid(rows = vars(model)) +
+  labs(
+    y = "Volatility density in the Monte Carlo sample",
+    x = "Time"
+  ) +
+  theme_bw()
+ggsave("output/volatility_densities.png", density_plots,
+  width = 10, height = 8, dpi = 300
+)
