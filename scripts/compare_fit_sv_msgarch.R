@@ -494,8 +494,6 @@ ggsave("output/cum_qlike_ms_minus_sv.png", qlike_plot,
   width = 10, height = 4, dpi = 300
 )
 
-
-# TODO: geom_bin_2d plots for the mc_sigma samples
 df_sigma_ms <- data.frame(
   mc_sigma = c(mc_sigma_ms),
   bt_idx = rep(1:n_bt, times = n_draws),
