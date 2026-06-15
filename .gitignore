@@ -9,11 +9,10 @@
 
 # R environment 
 renv/
+.renv.lock
 
 # Output
 output/*
-# Keep images
-!output/*.png
 
 # Other stuff
 *.html

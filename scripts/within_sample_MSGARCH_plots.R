@@ -22,35 +22,40 @@ selected <- !is.na(y)
 y <- y[selected]
 lret <- diff(log(y))
 lret_dates <- df$datetime[selected]
-lret_dates <- lret_dates[-1]
+lret_dates <- lret_dates[-length(lret_dates)]
 ndraws <- 5000
+
+spec <- CreateSpec(
+  variance.spec = list(model = c("sGARCH", "sGARCH")),
+  distribution.spec = list(distribution = c("norm", "norm"))
+)
 
 ctr <- list(
   nburn = ndraws,
   nmcmc = ndraws,
   nthin = 1
 )
-spec <- CreateSpec(
-  variance.spec = list(model = c("sGARCH", "sGARCH")),
-  distribution.spec = list(distribution = c("norm", "norm"))
-)
 fit_mcmc <- FitMCMC(spec = spec, data = lret, ctr = ctr)
-state <- State(object = fit_mcmc)
 summary(fit_mcmc)
+mcmc_par <- fit_mcmc$par
+avg_par <- colMeans(mcmc_par)
+# state <- State(object = spec, par = avg_par, data = lret)
+state <- State(fit_mcmc)
 # exclude the last smoothed, consider the second regime
-statesm <- state$SmoothProb[seq_along(lret), , 2]
-dim(statesm)
+statesm <- state$SmoothProb[1:dim(state$SmoothProb)[1]-1, , 2]
 # collapse the simulations by averaging
-probs <- rowMeans(statesm)
-# get the 95 quantiles
-quantiles <- apply(statesm, 1, FUN = function(x) quantile(x, c(0.025, 0.975)))
+if (!is.null(dim(statesm))){
+  probs <- rowMeans(statesm)
+} else {
+  probs <- statesm
+}
+
+# probs <- state$SmoothProb[seq_along(lret),1,2]
 # combine in df
 df_plot <- data.frame(
-  r = lret / (6 * sd(lret)) + 0.5,
+  r = lret / (12 * sd(lret)) + 0.5,
   t = lret_dates,
-  probs = probs,
-  lower = quantiles[1, ],
-  upper = quantiles[2, ]
+  probs = probs
 )
 
 cols <- list(
@@ -61,14 +66,15 @@ cols <- list(
 
 plot <- ggplot(
   df_plot[, ],
-  aes(x = t, y = probs, ymin = lower, ymax = upper)
+  aes(x = t, y = probs)
 ) +
-  # geom_ribbon(aes(fill = ".95 band")) +
-  geom_point(aes(x = t, y = r, color = "Return obs."),
+  geom_point(aes(x = t, y = r, color = "r_t"),
     size = 0.6, alpha = 0.7
   ) +
-  geom_line(aes(color = "Smoothed prob."), alpha = 0.7) +
-  scale_color_manual(values = c("black", cols$msgarch)) +
+  geom_line(aes(color = "P(S_t = 2)"), alpha = 0.7) +
+  scale_color_manual(values = c(
+    "r_t" = "black", 
+    "P(S_t = 2)" = cols$msgarch)) +
   scale_y_continuous(limits = c(0, 1)) +
   theme_bw()
 plot
