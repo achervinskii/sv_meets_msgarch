@@ -11,8 +11,9 @@
 renv/
 .renv.lock
 
-# Output
+# Output, data
 output/*
+data/*
 
 # Other stuff
 *.html

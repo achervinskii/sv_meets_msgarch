@@ -1,10 +1,13 @@
 # The goal is to create plots for the in-sample bayesian fit
 # The states are of interest, as they are the basis of the forecasting ability in MSGARCH
 
+library(stochvol)
 library(ggplot2)
 library(MSGARCH)
 library(dplyr)
+library(coda)
 library(patchwork)
+library(tidyr)
 
 set.seed(1)
 
@@ -42,9 +45,9 @@ avg_par <- colMeans(mcmc_par)
 # state <- State(object = spec, par = avg_par, data = lret)
 state <- State(fit_mcmc)
 # exclude the last smoothed, consider the second regime
-statesm <- state$SmoothProb[1:dim(state$SmoothProb)[1]-1, , 2]
+statesm <- state$SmoothProb[1:dim(state$SmoothProb)[1] - 1, , 2]
 # collapse the simulations by averaging
-if (!is.null(dim(statesm))){
+if (!is.null(dim(statesm))) {
   probs <- rowMeans(statesm)
 } else {
   probs <- statesm
@@ -73,10 +76,76 @@ plot <- ggplot(
   ) +
   geom_line(aes(color = "P(S_t = 2)"), alpha = 0.7) +
   scale_color_manual(values = c(
-    "r_t" = "black", 
-    "P(S_t = 2)" = cols$msgarch)) +
+    "r_t" = "black",
+    "P(S_t = 2)" = cols$msgarch
+  )) +
   scale_y_continuous(limits = c(0, 1)) +
   theme_bw()
 plot
 
 ggsave("output/msgarch_states_1.png", plot, width = 10, height = 5, dpi = 300)
+
+
+# run 4 chains to obtain diagnostics
+n = 4
+chains_ms <- vector("list", length = 4)
+for (i in 1:4) {
+  fit <- FitMCMC(spec = spec, data = lret, ctr = ctr)
+  pars <- fit$par
+  chains_ms[[i]] <- pars
+  print(i)
+}
+
+coda_to_df <- function(chains_list){
+# convert the coda objects to the dataframe and plot
+  mcmclist <- as.mcmc.list(chains_list)
+  effectiveSize(mcmclist) 
+  mcmcmatrix <- as.matrix(mcmclist, iters = TRUE, chains = TRUE)
+  mcmcdf <- data.frame(mcmcmatrix) |>
+    pivot_longer(cols = (!ITER & !CHAIN), values_to = "y", names_to = "par")
+}
+
+# print(gelman.diag(mcmclist))
+mcmc_ms_df <- coda_to_df(chains_ms)
+
+pars <- unique(mcmc_ms_df$par)
+aligner <- c(rbind(c(1:3), c(4:6)), 7, 8)
+pars <- pars[aligner]
+
+plot_param_mcmc <- function(df, par_name) {
+  out <- ggplot(filter(df, par == par_name), 
+    aes(x = ITER, y = y, color = as.factor(CHAIN))) +
+    scale_colour_discrete(palette = scales::pal_brewer(palette = "Dark2"))+
+    xlab(NULL) +
+    ylab(par_name)+
+    geom_line(alpha = 0.7)+
+    theme_bw() +
+    labs(color = "")+
+    theme(legend.position = "none")
+}
+plots <- lapply(pars, FUN = \(x) plot_param_mcmc(mcmc_ms_df, x))
+plots_combined <- wrap_plots(plots, ncol = 2)
+ggsave("output/mcmc_msgarch.png", plots_combined, width = 7, height = 10, dpi = 500)
+
+chains_sv <- vector("list", length = 4)
+for (i in 1:4) {
+  fit <- svsample(
+    lret,
+    draws = ndraws,
+    burnin = ndraws,
+    n_chain = 1,
+    quiet = TRUE
+  )
+  pars <- fit$para
+  chains_sv[[i]] <- pars[[1]][,1:3]
+  print(i)
+}
+
+mcmc_sv_df <- coda_to_df(chains_sv)
+pars <- unique(mcmc_sv_df$par)
+plots <- lapply(pars, FUN = \(x) plot_param_mcmc(mcmc_sv_df,x))
+plots_combined <- wrap_plots(plots, ncol = 2)
+ggsave("output/mcmc_sv.png", plots_combined, width = 7, height = 5, dpi = 500)
+
+
+ 
