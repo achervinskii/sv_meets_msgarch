@@ -1,7 +1,6 @@
-library(ggplot2) 
+library(ggplot2)
 library(stochvol)
 library(MSGARCH)
-# devtools::load_all("../MSGARCH_mod/Package/")
 library(future.apply)
 library(progressr)
 library(dplyr)
@@ -18,11 +17,14 @@ end_date <- "2026-06-13"
 # hyperparames for backtesting
 n_ahead <- 10
 backtest_length <- 500
-n_draws <- 3000
-n_burnin <- 3000
+n_draws <- 10000
+n_burnin <- 10000
 horizon_to_plot <- 5
 msgarch_df <- c(-3, -2, -1, 2)
-labels_df <- c("QLIKE", "Model-implied", "Gaussian Kernel", "Student t Kernel (v = 2)")
+labels_df <- c(
+  "QLIKE", "Model-implied",
+  "Gaussian Kernel", "Student t Kernel (v = 2)"
+)
 sv_df <- msgarch_df
 # derived params for backtesting
 # number of the data points used for test used for array indexing
@@ -43,7 +45,7 @@ last_train_idx_start <- n_total - backtest_length - 1
 last_train_idx_end <- n_total - n_ahead - 1
 
 # compute realized volatility on hourly data
-df_hourly <- fetch_hourly_prices()
+df_hourly <- fetch_hourly_prices(ticker)
 
 df_rv <- df_hourly |>
   filter_out(is.na(close)) |>
@@ -88,11 +90,6 @@ ms_model <- function(draws = 5000, burnin = 5000) {
       nthin = 1
     ),
     draws = draws,
-
-    # if nsim is set then for each posterior draw nsim observations are sampled
-    # to me it seems more appripriate to sample one simulation per mcmc path
-    # it also possibly causes memory issues, look up the code
-    # nsim = nsim,
     type = "msgarch"
   )
 }
@@ -126,6 +123,9 @@ predict_model <- function(model, y, n_ahead) {
       variance.spec = list(model = c("sGARCH", "sGARCH")),
       distribution.spec = list(distribution = c("norm", "norm"))
     )
+    ml_fit <- FitML(spec = spec, data = y)
+    ctr_mcmc <- model$ctr
+    ctr_mcmc$par0 <- ml_fit$par
     fit <- FitMCMC(spec = spec, data = y, ctr = model$ctr)
     mc_pred <- predict(
       object = fit,
@@ -134,7 +134,6 @@ predict_model <- function(model, y, n_ahead) {
     )
     mc_y <- t(mc_pred$draw)
     mc_sigma <- t(mc_pred$vol_draw)
-    # mc_sigma <- matrix(NA_real_, nrow = length(mc_y), ncol = n_ahead)
     result <- list(
       sigma = mc_sigma,
       y = mc_y
@@ -251,6 +250,7 @@ mc_sigma_sv <- array(
 # split the training sets between the workers
 # the packages don't support online learning anyways
 xs <- seq_len(n_bt)
+seeds <- 
 # with a progress bar
 with_progress({
   p <- progressor(along = xs)
@@ -281,7 +281,7 @@ for (res in results_sv) {
   mc_sigma_sv[idx, ] <- res$mc_sigma
 }
 
-plan(multisession, workers = 5)
+plan(multisession, workers = 3)
 # repeat for ms garch
 msgarch <- ms_model(draws = n_draws, burnin = n_burnin)
 #
@@ -346,8 +346,13 @@ test_start_idx <- last_train_idx_start + horizon_to_plot
 test_end_idx <- last_train_idx_end + horizon_to_plot
 test_data <- lret[test_start_idx:test_end_idx]
 
+start_var <- last_train_idx_start + horizon_to_plot
+end_var <- last_train_idx_end + horizon_to_plot
+var_dates <- lret_dates[start_var:end_var]
+
 var_df <- data.frame(
-  t = seq_along(test_data),
+  # t = seq_along(test_data),
+  t = var_dates,
   y = test_data,
   var_lb_sv = var_95_sv[, horizon_to_plot, 1],
   var_ub_sv = var_95_sv[, horizon_to_plot, 2],
@@ -380,7 +385,7 @@ plot <- ggplot(var_df, aes(x = t)) +
     labels = c("MS-GARCH", "SV")
   ) +
   labs(
-    x = "Time",
+    x = "Date",
     y = "Double-sided 0.95 VaR"
   ) +
   theme_bw()
@@ -461,10 +466,10 @@ diff_plot <- ggplot(
   geom_line(aes(color = h)) +
   scale_color_gradient(low = "green", high = "red") +
   geom_hline(yintercept = 0) +
-  coord_cartesian(ylim = c(-20, 20)) +
+  coord_cartesian(ylim = c(-10, 10)) +
   # scale_y_continuous(limits = c(-15, 15)) +
   labs(
-    color = "Horizon", y = "LogLikelihood(MS-GARCH,t) - LogLikelihood(SV,t)",
+    color = "Horizon", y = "LogLikelihood(MS-GARCH,t,h) - LogLikelihood(SV,t,h)",
     x = "Date"
   ) +
   theme_bw() +
@@ -472,7 +477,7 @@ diff_plot <- ggplot(
 
 ggsave("output/cum_loglik_ms_minus_sv_across_kde.png",
   diff_plot,
-  width = 10, height = 12, dpi = 300
+  width = 7, height = 7, dpi = 500
 )
 
 # QLIKE separately to control y sale
@@ -483,40 +488,43 @@ qlike_plot <- ggplot(
   geom_line(aes(color = h)) +
   scale_color_gradient(low = "green", high = "red") +
   geom_hline(yintercept = 0) +
-  scale_y_continuous(limits = c(-100, 100)) +
+  scale_y_continuous(limits = c(-20, 20)) +
   labs(
-    color = "Horizon", y = "-(QLIKE(MS-GARCH, t) - QLIKE(SV, t))",
+    color = "Horizon", y = "QLIKE(MS-GARCH,t,h) - QLIKE(SV,t,h)",
     x = "Date"
   ) +
   theme_bw()
 
 ggsave("output/cum_qlike_ms_minus_sv.png", qlike_plot,
-  width = 10, height = 4, dpi = 300
+  width = 7, height = 4, dpi = 500
 )
 
+n_draws_plot = 700
 df_sigma_ms <- data.frame(
-  mc_sigma = c(mc_sigma_ms),
-  bt_idx = rep(1:n_bt, times = n_draws),
+  mc_sigma = c(mc_sigma_ms[,1:n_draws_plot]),
+  bt_idx = rep(1:n_bt, times = n_draws_plot),
   model = "MS-GARCH"
 )
 df_sigma_sv <- data.frame(
-  mc_sigma = c(mc_sigma_sv),
-  bt_idx = rep(1:n_bt, times = n_draws),
+  mc_sigma = c(mc_sigma_sv[,1:n_draws_plot]),
+  bt_idx = rep(1:n_bt, times = n_draws_plot),
   model = "SV"
 )
 df_sigma <- rbind(df_sigma_ms, df_sigma_sv)
+df_sigma$t <- lret_dates[df_sigma$bt_idx + last_train_idx_start]
 density_plots <- ggplot(
   df_sigma,
-  aes(bt_idx, mc_sigma)
+  aes(t, mc_sigma)
 ) +
-  geom_point(alpha = 1 / 100, size = 0.5) +
+  geom_point(alpha = 1 / 100, size = 0.6, 
+    position = position_jitter(width = 1, height = 0)) +
   scale_y_continuous(limits = c(0, 0.05)) +
   facet_grid(rows = vars(model)) +
   labs(
     y = "Volatility density in the Monte Carlo sample",
-    x = "Time"
+    x = "Date"
   ) +
   theme_bw()
 ggsave("output/volatility_densities.png", density_plots,
-  width = 10, height = 8, dpi = 300
+  width = 7, height = 6, dpi = 500
 )
