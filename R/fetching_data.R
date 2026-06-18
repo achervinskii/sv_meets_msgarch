@@ -21,7 +21,7 @@ fetch_prices <- function(ticker, interval,
   )
 
   # a file-based cache
-  filename <- paste0("./data/", ticker, "-", start_date, "-", end_date, ".csv")
+  filename <- paste0("./data/", ticker, "-", start_date, "-", end_date, "-", interval, ".csv")
   if (file.exists(filename)) {
     df <- read.csv(filename)
     df$datetime <- as.POSIXct(df$datetime, tz = "UTC")
