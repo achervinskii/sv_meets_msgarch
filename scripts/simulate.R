@@ -118,4 +118,7 @@ plot_dens <- ggplot(df_dens, aes(x = y, colour = group)) +
 
 plot_comb <- plot + plot_dens + plot_layout(widths = c(3, 1))
 
-ggsave("output/msgarch_and_matched_sv_simulated.png", plot_comb, width = 10, height = 5, dpi = 300)
+ggsave("output/msgarch_and_matched_sv_simulated.png",
+  plot_comb,
+  width = 7, height = 4, dpi = 500
+)

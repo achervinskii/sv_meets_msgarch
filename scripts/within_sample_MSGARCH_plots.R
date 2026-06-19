@@ -41,7 +41,6 @@ ctr <- list(
   par0 = fit_ml$par
 )
 fit_mcmc <- FitMCMC(spec = spec, data = lret, ctr = ctr)
-summary(fit_mcmc)
 mcmc_par <- fit_mcmc$par
 avg_par <- colMeans(mcmc_par)
 state <- State(fit_mcmc)
