@@ -462,19 +462,20 @@ diff_plot <- ggplot(
   filter_out(df_diff, df_kde == "QLIKE"),
   aes(x = datetime, y = cum_diff, color = h, group = h)
 ) +
-  geom_line(aes(color = h)) +
-  scale_color_viridis_c()
+  geom_line() +
+  scale_color_viridis_c(breaks = c(1,5,10))+
 # scale_color_gradient(low = "green", high = "red") +
 geom_hline(yintercept = 0) +
   coord_cartesian(ylim = c(-10, 10)) +
   # scale_y_continuous(limits = c(-15, 15)) +
   labs(
     color = "Horizon",
-    y = "LogLikelihood(MS-GARCH,t,h) - LogLikelihood(SV,t,h)",
+    y ="LogLikelihood difference",
     x = "Date"
   ) +
   theme_bw() +
-  facet_grid(rows = vars(df_kde))
+  facet_grid(rows = vars(df_kde)) +
+  theme(legend.position = "right")
 
 ggsave("output/cum_loglik_ms_minus_sv_across_kde.png",
   diff_plot,
@@ -487,15 +488,16 @@ qlike_plot <- ggplot(
   aes(x = datetime, y = cum_diff, color = h, group = h)
 ) +
   geom_line(aes(color = h)) +
-  scale_color_viridis_c() +
+  scale_color_viridis_c(breaks = c(1,5,10)) +
   geom_hline(yintercept = 0) +
   scale_y_continuous(limits = c(-20, 20)) +
   labs(
     color = "Horizon",
-    y = "QLIKE(MS-GARCH,t,h) - QLIKE(SV,t,h)",
+    y = "QLIKE difference",
     x = "Date"
   ) +
-  theme_bw()
+  theme_bw()+
+  theme(legend.position = "right")
 
 ggsave("output/cum_qlike_ms_minus_sv.png", qlike_plot,
   width = 7, height = 4, dpi = 500
@@ -514,6 +516,7 @@ df_sigma_sv <- data.frame(
 )
 df_sigma <- rbind(df_sigma_ms, df_sigma_sv)
 df_sigma$t <- lret_dates[df_sigma$bt_idx + last_train_idx_start]
+
 density_plots <- ggplot(
   df_sigma,
   aes(t, mc_sigma)
@@ -525,7 +528,7 @@ density_plots <- ggplot(
   scale_y_continuous(limits = c(0, 0.05)) +
   facet_grid(rows = vars(model)) +
   labs(
-    y = "Volatility density in the Monte Carlo sample",
+    y = "Volatility",
     x = "Date"
   ) +
   theme_bw()

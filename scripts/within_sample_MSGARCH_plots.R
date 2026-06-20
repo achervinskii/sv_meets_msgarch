@@ -76,7 +76,7 @@ plot <- ggplot(
   geom_line(aes(color = "P(s_t = 2)"), alpha = 0.7) +
   scale_color_manual(values = c(
     "return" = "black",
-    "P(s_t = 2)" = cols$msgarch
+    "P(s_t = 2)" = cols$hl
   )) +
   labs(
     y = "Probability of the second state",
@@ -111,6 +111,13 @@ coda_to_df <- function(chains_list) {
 
 mcmc_ms_df <- coda_to_df(chains_ms)
 mcmc_ms_df$ITER <- mcmc_ms_df$ITER + 10000
+mcmc_ms_df <- mcmc_ms_df |>
+  mutate(par = case_when(
+    par == "alpha0_1" ~ "omega_1",
+    par == "alpha0_2" ~ "omega_2",
+    par == "alpha1_1" ~ "alpha_1",
+    par == "alpha1_2" ~ "alpha_2",
+    TRUE ~ par))
 
 pars <- unique(mcmc_ms_df$par)
 aligner <- c(rbind(c(1:3), c(4:6)), 7, 8)

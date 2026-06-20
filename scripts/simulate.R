@@ -64,8 +64,7 @@ second_regime_df <- data.frame(
 plot <- ggplot(df, aes(x = t)) +
   geom_rect(
     data = second_regime_df,
-    aes(xmin = tmin, xmax = tmax, ymin = -ymax, ymax = ymax),
-    fill = cols$hl,
+    aes(xmin = tmin, xmax = tmax, ymin = -ymax, ymax = ymax, fill = "MS-GARCH in state 2"),
     alpha = 0.2,
     inherit.aes = FALSE
   ) +
@@ -78,7 +77,8 @@ plot <- ggplot(df, aes(x = t)) +
   theme(
     axis.title.x = element_blank(),
     axis.title.y = element_blank(),
-  )
+  ) +
+  scale_fill_manual(name = NULL, values = c("MS-GARCH in state 2" = cols$hl))
 
 burnin <- 1000
 y_dim <- length(y_sv)
@@ -114,10 +114,11 @@ plot_dens <- ggplot(df_dens, aes(x = y, colour = group)) +
   theme(
     axis.title.x = element_blank(),
     axis.title.y = element_blank(),
-    legend.position = c(0.6, 0.9)
   )
 
-plot_comb <- plot + plot_dens + plot_layout(widths = c(3, 1))
+plot_comb <- plot + plot_dens +
+  plot_layout(widths = c(2.5, 1), guides = "collect") &
+  theme(legend.position = "bottom")
 
 ggsave("output/msgarch_and_matched_sv_simulated.png",
   plot_comb,
