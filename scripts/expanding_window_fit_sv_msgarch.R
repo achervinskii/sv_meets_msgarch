@@ -250,7 +250,6 @@ mc_sigma_sv <- array(
 # split the training sets between the workers
 # the packages don't support online learning anyways
 xs <- seq_len(n_bt)
-seeds <- 
 # with a progress bar
 with_progress({
   p <- progressor(along = xs)
@@ -370,7 +369,7 @@ cols <- list(
 plot <- ggplot(var_df, aes(x = t)) +
   geom_line(aes(y = y), color = "black") +
   geom_ribbon(aes(ymin = var_lb_sv, ymax = var_ub_sv),
-    fill = "blue", alpha = 0.1
+    fill = cols$sv, alpha = 0.1
   ) +
   geom_line(aes(y = var_lb_sv, color = "SV")) +
   geom_line(aes(y = var_ub_sv, color = "SV")) +
@@ -464,12 +463,14 @@ diff_plot <- ggplot(
   aes(x = datetime, y = cum_diff, color = h, group = h)
 ) +
   geom_line(aes(color = h)) +
-  scale_color_gradient(low = "green", high = "red") +
-  geom_hline(yintercept = 0) +
+  scale_color_viridis_c()
+# scale_color_gradient(low = "green", high = "red") +
+geom_hline(yintercept = 0) +
   coord_cartesian(ylim = c(-10, 10)) +
   # scale_y_continuous(limits = c(-15, 15)) +
   labs(
-    color = "Horizon", y = "LogLikelihood(MS-GARCH,t,h) - LogLikelihood(SV,t,h)",
+    color = "Horizon",
+    y = "LogLikelihood(MS-GARCH,t,h) - LogLikelihood(SV,t,h)",
     x = "Date"
   ) +
   theme_bw() +
@@ -486,11 +487,12 @@ qlike_plot <- ggplot(
   aes(x = datetime, y = cum_diff, color = h, group = h)
 ) +
   geom_line(aes(color = h)) +
-  scale_color_gradient(low = "green", high = "red") +
+  scale_color_viridis_c() +
   geom_hline(yintercept = 0) +
   scale_y_continuous(limits = c(-20, 20)) +
   labs(
-    color = "Horizon", y = "QLIKE(MS-GARCH,t,h) - QLIKE(SV,t,h)",
+    color = "Horizon",
+    y = "QLIKE(MS-GARCH,t,h) - QLIKE(SV,t,h)",
     x = "Date"
   ) +
   theme_bw()
@@ -499,14 +501,14 @@ ggsave("output/cum_qlike_ms_minus_sv.png", qlike_plot,
   width = 7, height = 4, dpi = 500
 )
 
-n_draws_plot = 700
+n_draws_plot <- 700
 df_sigma_ms <- data.frame(
-  mc_sigma = c(mc_sigma_ms[,1:n_draws_plot]),
+  mc_sigma = c(mc_sigma_ms[, 1:n_draws_plot]),
   bt_idx = rep(1:n_bt, times = n_draws_plot),
   model = "MS-GARCH"
 )
 df_sigma_sv <- data.frame(
-  mc_sigma = c(mc_sigma_sv[,1:n_draws_plot]),
+  mc_sigma = c(mc_sigma_sv[, 1:n_draws_plot]),
   bt_idx = rep(1:n_bt, times = n_draws_plot),
   model = "SV"
 )
@@ -516,8 +518,10 @@ density_plots <- ggplot(
   df_sigma,
   aes(t, mc_sigma)
 ) +
-  geom_point(alpha = 1 / 100, size = 0.6, 
-    position = position_jitter(width = 1, height = 0)) +
+  geom_point(
+    alpha = 1 / 100, size = 0.6,
+    position = position_jitter(width = 1, height = 0)
+  ) +
   scale_y_continuous(limits = c(0, 0.05)) +
   facet_grid(rows = vars(model)) +
   labs(

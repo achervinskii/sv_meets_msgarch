@@ -121,7 +121,8 @@ plot_param_mcmc <- function(df, par_name) {
     filter(df, par == par_name),
     aes(x = ITER, y = y, color = as.factor(CHAIN))
   ) +
-    scale_colour_discrete(palette = scales::pal_brewer(palette = "Dark2")) +
+    # scale_colour_discrete(palette = scales::pal_brewer(palette = "Dark2")) +
+    scale_colour_viridis_d()+
     xlab(NULL) +
     ylab(par_name) +
     geom_line(alpha = 0.8, linewidth = 0.4) +
@@ -131,7 +132,7 @@ plot_param_mcmc <- function(df, par_name) {
 }
 plots <- lapply(pars, FUN = \(x) plot_param_mcmc(mcmc_ms_df, x))
 plots_combined <- wrap_plots(plots, ncol = 2)
-ggsave("output/mcmc_msgarch.png", plots_combined, width = 7, height = 10, dpi = 500)
+ggsave("output/mcmc_msgarch.png", plots_combined, width = 7, height = 7, dpi = 500)
 
 chains_sv <- vector("list", length = 4)
 for (i in 1:4) {

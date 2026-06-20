@@ -5,11 +5,12 @@ source("./R/simulation_and_plotting.R")
 set.seed(1)
 
 cols <- list(
-  msgarch = adjustcolor("red"),
+  # msgarch = adjustcolor("red"),
+  msgarch = adjustcolor("#770000"),
   sv = adjustcolor("#007712"),
   hl = adjustcolor("#ff6d00")
 )
-alp <- 0.6
+alp <- 1
 lw <- 0.6
 ymax <- 15
 
@@ -72,7 +73,7 @@ plot <- ggplot(df, aes(x = t)) +
     color = cols$msgarch, linewidth = lw, alpha = alp
   ) +
   geom_line(aes(y = y_sv), color = cols$sv, linewidth = lw, alpha = alp) +
-  scale_y_continuous(limits = c(-ymax, ymax)) +
+  coord_cartesian(ylim = c(-ymax, ymax)) +
   theme_bw() +
   theme(
     axis.title.x = element_blank(),
